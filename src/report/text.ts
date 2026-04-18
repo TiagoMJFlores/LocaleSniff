@@ -1,61 +1,72 @@
 import path from 'node:path';
-import type { Finding, LocaleEntry, LocaleFileTarget, Platform, ScanResult } from '../types.js';
+import type {
+  Finding,
+  LocaleEntry,
+  LocaleFileTarget,
+  Platform,
+  RunConfig,
+  ScanResult,
+} from '../types.js';
 import { findInsertionPoint } from '../locale/insertionPoint.js';
 import { resolveMatch, type ResolvedFinding } from '../detect/resolveMatch.js';
 
-export function renderText(result: ScanResult): string {
+export function renderText(result: ScanResult, cfg: RunConfig): string {
   const lines: string[] = [];
   lines.push('LocaleSniff report');
   lines.push('==================');
 
-  if (result.findings.length === 0) {
-    lines.push('No findings.');
+  const userFacingFindings = result.findings.filter((f) => f.isUserFacing);
+  const technicalFindings = result.findings.filter((f) => !f.isUserFacing);
+
+  // ───── Findings section (always present) ─────
+  lines.push('');
+  lines.push('## Findings (user-facing)');
+  if (userFacingFindings.length === 0) {
+    lines.push('  (none)');
   } else {
-    // Resolve each user-facing finding against the per-platform index.
+    const byFile = groupByFile(userFacingFindings);
+    for (const [file, findings] of byFile) {
+      lines.push('');
+      for (const f of findings) {
+        lines.push(`  ${file}:${f.line}`);
+        lines.push(`    ${truncate(f.sourceLine || JSON.stringify(f.stringLiteral))}`);
+        if (f.rationale) lines.push(`    (${f.rationale})`);
+      }
+    }
+  }
+
+  if (cfg.includeTechnical && technicalFindings.length > 0) {
+    lines.push('');
+    lines.push('## Findings (technical — classified as non-user-facing)');
+    const byFile = groupByFile(technicalFindings);
+    for (const [file, findings] of byFile) {
+      lines.push('');
+      for (const f of findings) {
+        lines.push(`  ${file}:${f.line}`);
+        lines.push(`    ${truncate(f.sourceLine || JSON.stringify(f.stringLiteral))}`);
+        if (f.rationale) lines.push(`    (${f.rationale})`);
+      }
+    }
+  } else if (technicalFindings.length > 0) {
+    lines.push('');
+    lines.push(`(${technicalFindings.length} technical strings ignored — re-run with --include-technical to see them)`);
+  }
+
+  // ───── Recommendations section (only when --recommend) ─────
+  if (cfg.recommend && userFacingFindings.length > 0) {
     const resolvedByFinding = new Map<Finding, ResolvedFinding>();
-    for (const f of result.findings) {
-      if (!f.isUserFacing) continue;
+    for (const f of userFacingFindings) {
       const idx = result.localeIndexes[f.platform];
       if (!idx) continue;
       resolvedByFinding.set(f, resolveMatch(f, idx));
     }
 
-    const byFile = new Map<string, Finding[]>();
-    for (const f of result.findings) {
-      const arr = byFile.get(f.file) ?? [];
-      arr.push(f);
-      byFile.set(f.file, arr);
-    }
-
     lines.push('');
-    lines.push('## Source file changes');
-    for (const [file, findings] of byFile) {
-      lines.push('');
-      lines.push(`  ${file}`);
-      for (const f of findings) {
-        const marker = f.isUserFacing ? 'USER-FACING' : 'technical';
-        lines.push(`    line ${f.line}  [${marker}]  ${JSON.stringify(f.stringLiteral)}`);
-        if (!f.isUserFacing) {
-          if (f.rationale) lines.push(`      (${f.rationale})`);
-          continue;
-        }
-        const resolved = resolvedByFinding.get(f);
-        if (!resolved) {
-          lines.push(`      → suggested key: ${f.suggestedKey}`);
-          if (f.rationale) lines.push(`      (${f.rationale})`);
-          continue;
-        }
-        renderSourceOptions(lines, resolved);
-        if (f.rationale) lines.push(`      (${f.rationale})`);
-      }
-    }
-
-    const localeChanges = renderLocaleChanges(result, resolvedByFinding);
-    if (localeChanges.length > 0) {
-      lines.push('');
-      lines.push('## Locale file changes');
-      for (const l of localeChanges) lines.push(l);
-    }
+    lines.push('## Recommendations');
+    renderRecommendations(lines, result, resolvedByFinding);
+  } else if (!cfg.recommend && userFacingFindings.length > 0) {
+    lines.push('');
+    lines.push('(re-run with --recommend to get suggested keys, translations, and insertion points)');
   }
 
   if (result.skipped.length > 0) {
@@ -75,6 +86,104 @@ export function renderText(result: ScanResult): string {
   return lines.join('\n');
 }
 
+function groupByFile(findings: Finding[]): Map<string, Finding[]> {
+  const m = new Map<string, Finding[]>();
+  for (const f of findings) {
+    const arr = m.get(f.file) ?? [];
+    arr.push(f);
+    m.set(f.file, arr);
+  }
+  return m;
+}
+
+function renderRecommendations(
+  lines: string[],
+  result: ScanResult,
+  resolvedByFinding: Map<Finding, ResolvedFinding>,
+): void {
+  // Per-finding source-file recommendation blurb.
+  const byFile = new Map<string, Finding[]>();
+  for (const f of resolvedByFinding.keys()) {
+    (byFile.get(f.file) ?? (byFile.set(f.file, []), byFile.get(f.file)!)).push(f);
+  }
+
+  for (const [file, findings] of byFile) {
+    lines.push('');
+    lines.push(`  ${file}`);
+    for (const f of findings) {
+      const resolved = resolvedByFinding.get(f)!;
+      lines.push(`    line ${f.line}:  ${truncate(f.sourceLine || JSON.stringify(f.stringLiteral))}`);
+      lines.push(`       detected: ${JSON.stringify(f.stringLiteral)}`);
+      renderSourceOptions(lines, resolved);
+    }
+  }
+
+  // Per-platform locale-file changes.
+  type Entry = { key: string; value: string };
+  type Bucket = {
+    fillOptionA: Map<string, Entry[]>;
+    newOptionB: Map<string, Entry[]>;
+    hasAnyReuseOption: boolean;
+  };
+  const perPlatform = new Map<Platform, Bucket>();
+
+  for (const [finding, resolved] of resolvedByFinding) {
+    const platform = finding.platform;
+    const b =
+      perPlatform.get(platform) ??
+      ({
+        fillOptionA: new Map<string, Entry[]>(),
+        newOptionB: new Map<string, Entry[]>(),
+        hasAnyReuseOption: false,
+      } as Bucket);
+    perPlatform.set(platform, b);
+    if (resolved.kind === 'reuse-or-new') b.hasAnyReuseOption = true;
+
+    if (resolved.kind !== 'reuse-only') {
+      for (const [locale, value] of Object.entries(finding.translations)) {
+        (b.newOptionB.get(locale) ?? (b.newOptionB.set(locale, []), b.newOptionB.get(locale)!)).push({
+          key: resolved.optionB.key,
+          value,
+        });
+      }
+    }
+    if (resolved.kind === 'reuse-or-new' && resolved.optionA) {
+      for (const locale of resolved.optionA.missingLocales) {
+        const value = finding.translations[locale];
+        if (value === undefined) continue;
+        (b.fillOptionA.get(locale) ?? (b.fillOptionA.set(locale, []), b.fillOptionA.get(locale)!)).push({
+          key: resolved.optionA.key,
+          value,
+        });
+      }
+    }
+  }
+
+  const showPlatformTag = perPlatform.size > 1;
+
+  for (const [platform, bucket] of perPlatform) {
+    const targets = result.localeTargets[platform];
+    const entriesByFile = result.localeEntriesByFile[platform] ?? {};
+    if (!targets) continue;
+    const tag = showPlatformTag ? ` [${platform}]` : '';
+
+    if (bucket.fillOptionA.size > 0) {
+      lines.push('');
+      lines.push(`### Fill missing translations for existing keys${tag}`);
+      renderEntriesBucket(lines, bucket.fillOptionA, targets, entriesByFile, platform);
+    }
+
+    if (bucket.newOptionB.size > 0) {
+      lines.push('');
+      const header = bucket.hasAnyReuseOption
+        ? `### Alternative — add new key(s) instead${tag}`
+        : `### Add new key(s)${tag}`;
+      lines.push(header);
+      renderEntriesBucket(lines, bucket.newOptionB, targets, entriesByFile, platform);
+    }
+  }
+}
+
 function renderSourceOptions(lines: string[], resolved: ResolvedFinding): void {
   if (resolved.kind === 'new-only') {
     lines.push(`      → suggested key: ${resolved.optionB.key}`);
@@ -92,7 +201,6 @@ function renderSourceOptions(lines: string[], resolved: ResolvedFinding): void {
     lines.push(`      → alternative: create new key "${resolved.optionB.key}" (only if semantics differ)`);
     return;
   }
-  // reuse-or-new
   lines.push(`      → Option A: reuse existing key "${A.key}"`);
   lines.push(`         present in: ${A.presentInLocales.join(', ')}`);
   lines.push(`         missing in: ${A.missingLocales.join(', ')} (translations needed)`);
@@ -102,88 +210,6 @@ function renderSourceOptions(lines: string[], resolved: ResolvedFinding): void {
     );
   }
   lines.push(`      → Option B: create new key "${resolved.optionB.key}"`);
-}
-
-function renderLocaleChanges(
-  result: ScanResult,
-  resolvedByFinding: Map<Finding, ResolvedFinding>,
-): string[] {
-  type Entry = { key: string; value: string };
-  // Two buckets per (platform, locale):
-  //   - fills (Option A, missing locales)
-  //   - news  (Option B, new key for all locales)
-  type Bucket = {
-    fillOptionA: Map<string, Entry[]>; // locale → entries to add for existing key
-    newOptionB: Map<string, Entry[]>;  // locale → entries to add for new key
-  };
-  // Per-platform state tracks whether ANY finding on this platform had an
-  // Option A (reuse-or-new); used to decide header labeling ("Option B" vs
-  // just "add new keys").
-  type PlatformState = Bucket & { hasAnyReuseOption: boolean };
-  const perPlatform = new Map<Platform, PlatformState>();
-
-  for (const [finding, resolved] of resolvedByFinding) {
-    const platform = finding.platform;
-    const b =
-      perPlatform.get(platform) ??
-      ({
-        fillOptionA: new Map<string, Entry[]>(),
-        newOptionB: new Map<string, Entry[]>(),
-        hasAnyReuseOption: false,
-      } as PlatformState);
-    perPlatform.set(platform, b);
-
-    if (resolved.kind === 'reuse-or-new') b.hasAnyReuseOption = true;
-
-    // New-key entries (shown unless reuse-only fully covers the string)
-    if (resolved.kind !== 'reuse-only') {
-      for (const [locale, value] of Object.entries(finding.translations)) {
-        (b.newOptionB.get(locale) ?? (b.newOptionB.set(locale, []), b.newOptionB.get(locale)!)).push({
-          key: resolved.optionB.key,
-          value,
-        });
-      }
-    }
-    // Option A missing-locales entries (only shown when partial match)
-    if (resolved.kind === 'reuse-or-new' && resolved.optionA) {
-      for (const locale of resolved.optionA.missingLocales) {
-        const value = finding.translations[locale];
-        if (value === undefined) continue;
-        (b.fillOptionA.get(locale) ?? (b.fillOptionA.set(locale, []), b.fillOptionA.get(locale)!)).push({
-          key: resolved.optionA.key,
-          value,
-        });
-      }
-    }
-  }
-
-  const out: string[] = [];
-
-  const shouldShowPlatformTag = perPlatform.size > 1;
-
-  for (const [platform, bucket] of perPlatform) {
-    const targets = result.localeTargets[platform];
-    const entriesByFile = result.localeEntriesByFile[platform] ?? {};
-    if (!targets) continue;
-    const tag = shouldShowPlatformTag ? ` [${platform}]` : '';
-
-    if (bucket.fillOptionA.size > 0) {
-      out.push('');
-      out.push(`### Fill missing translations for existing keys${tag}`);
-      renderEntriesBucket(out, bucket.fillOptionA, targets, entriesByFile, platform);
-    }
-
-    if (bucket.newOptionB.size > 0) {
-      out.push('');
-      const header = bucket.hasAnyReuseOption
-        ? `### Alternative — add new key(s) instead${tag}`
-        : `### Add new key(s)${tag}`;
-      out.push(header);
-      renderEntriesBucket(out, bucket.newOptionB, targets, entriesByFile, platform);
-    }
-  }
-
-  return out;
 }
 
 function renderEntriesBucket(
@@ -210,22 +236,27 @@ function renderEntriesBucket(
     out.push(`  ${rel}`);
 
     const fileEntries = entriesByFile[target.sourceFile] ?? [];
+
     type Group = {
       afterLine: number | null;
       matchedPrefix: string[] | null;
+      anchorKey: string | null;
       lineless: boolean;
       items: Array<{ key: string; value: string }>;
     };
     const groups = new Map<string, Group>();
     for (const e of entries) {
       const ip = findInsertionPoint(fileEntries, e.key);
-      const gk = ip.afterLine === null ? 'eof' : `after:${ip.afterLine}`;
-      const g = groups.get(gk) ?? {
-        afterLine: ip.afterLine,
-        matchedPrefix: ip.matchedPrefix,
-        lineless: ip.lineless,
-        items: [],
-      };
+      const gk = ip.anchorKey ?? 'eof';
+      const g =
+        groups.get(gk) ??
+        ({
+          afterLine: ip.afterLine,
+          matchedPrefix: ip.matchedPrefix,
+          anchorKey: ip.anchorKey,
+          lineless: ip.lineless,
+          items: [],
+        } as Group);
       g.items.push(e);
       groups.set(gk, g);
     }
@@ -235,8 +266,7 @@ function renderEntriesBucket(
       return a.afterLine - b.afterLine;
     });
     for (const g of ordered) {
-      const header = renderGroupHeader(g, target);
-      out.push(`    ${header}`);
+      out.push(`    ${renderGroupHeader(g, target)}`);
       for (const e of g.items) {
         out.push(`      ${renderEntry(platform, target, e.key, e.value)}`);
       }
@@ -245,22 +275,28 @@ function renderEntriesBucket(
 }
 
 function renderGroupHeader(
-  g: { afterLine: number | null; matchedPrefix: string[] | null; lineless: boolean },
+  g: {
+    afterLine: number | null;
+    matchedPrefix: string[] | null;
+    anchorKey: string | null;
+    lineless: boolean;
+  },
   target: LocaleFileTarget,
 ): string {
-  if (g.lineless) {
-    if (g.matchedPrefix && g.matchedPrefix.length > 0) {
-      return `within existing group "${g.matchedPrefix.join('.')}*":`;
+  if (g.anchorKey) {
+    if (g.lineless) {
+      return `insert after key "${g.anchorKey}":`;
     }
-    return `add new entries:`;
+    if (typeof g.afterLine === 'number') {
+      return `insert after key "${g.anchorKey}" (line ${g.afterLine}):`;
+    }
+    return `insert after key "${g.anchorKey}":`;
   }
-  if (g.afterLine === null) {
-    return `append at line ${target.lineCount + 1} (end of file):`;
+  // no anchor — EOF fallback
+  if (g.lineless) {
+    return `append at end of file:`;
   }
-  if (g.matchedPrefix && g.matchedPrefix.length > 0) {
-    return `insert after line ${g.afterLine} (within "${g.matchedPrefix.join('.')}*" group):`;
-  }
-  return `insert after line ${g.afterLine}:`;
+  return `append at line ${target.lineCount + 1} (end of file):`;
 }
 
 function renderEntry(
@@ -287,6 +323,12 @@ function escapeAndroidXml(v: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, "\\'")
     .replace(/\n/g, '\\n');
+}
+
+function truncate(s: string, max = 140): string {
+  if (s.length <= max) return s;
+  const half = Math.floor((max - 1) / 2);
+  return s.slice(0, half) + '…' + s.slice(s.length - half);
 }
 
 function toRepoRelative(absPath: string): string {

@@ -46,6 +46,12 @@ export interface Finding {
   line: number;
   platform: Platform;
   stringLiteral: string;
+  /**
+   * The full source line (trimmed) where the string was detected. Pulled from
+   * the diff's added lines at finding-construction time, not re-read from the
+   * file on disk — so it always matches what the LLM saw.
+   */
+  sourceLine: string;
   isUserFacing: boolean;
   rationale: string;
   suggestedKey: string;
@@ -108,5 +114,9 @@ export interface RunConfig {
   dryRun: boolean;
   verbose: boolean;
   ignore: string[];
+  /** When true, also ask the LLM for suggested keys + translations and render the Recommendations section. */
+  recommend: boolean;
+  /** When true, technical (non-user-facing) findings are shown in the text output instead of being summarised. */
+  includeTechnical: boolean;
   anthropicApiKey: string | undefined;
 }

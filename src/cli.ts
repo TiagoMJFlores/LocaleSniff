@@ -37,6 +37,8 @@ program
   .option('--concurrency <n>', 'LLM call concurrency', '4')
   .option('--repo <path>', 'Repo root', process.cwd())
   .option('--ignore <pattern...>', 'Glob patterns to exclude (repeatable). e.g. --ignore "**/*Tests*/**" "**/*Spec.swift"', collect, [])
+  .option('--recommend', 'Also generate suggested keys, translations, and insertion points')
+  .option('--include-technical', 'Include technical (non-user-facing) strings in the text report')
   .option('--dry-run', 'Resolve scope and print files, without calling the LLM')
   .option('-v, --verbose', 'Verbose output')
   .action(async (opts: RawCliOptions) => {
@@ -110,7 +112,7 @@ program
       const cache = new FileCache(cfg.cacheDir);
       const result = await runScan(cfg, { llm, cache, logger });
 
-      const rendered = cfg.outputFormat === 'json' ? renderJson(result) : renderText(result);
+      const rendered = cfg.outputFormat === 'json' ? renderJson(result) : renderText(result, cfg);
       console.log(rendered);
 
       process.exitCode = computeExitCode(result, cfg.failOn);

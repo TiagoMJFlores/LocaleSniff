@@ -5,9 +5,10 @@ export const FindingSchema = z.object({
   string_literal: z.string().min(1),
   is_user_facing: z.boolean(),
   rationale: z.string().max(500),
-  suggested_key: z.string().regex(/^[a-z0-9_.]+$/),
+  // Key + translations are allowed to be empty in detect-only mode (no --recommend).
+  suggested_key: z.string().regex(/^([a-z0-9_.]+)?$/),
   duplicate_of_key: z.string().optional(),
-  translations: z.record(z.string(), z.string()),
+  translations: z.record(z.string(), z.string()).default({}),
 });
 
 export const DetectResponseSchema = z.object({
@@ -52,4 +53,4 @@ export const REPORT_FINDINGS_TOOL = {
   },
 } as const;
 
-export const PROMPT_VERSION = 'v3';
+export const PROMPT_VERSION = 'v4';
