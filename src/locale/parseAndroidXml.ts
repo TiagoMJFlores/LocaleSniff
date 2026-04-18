@@ -32,6 +32,8 @@ export function parseAndroidStringsXmlText(raw: string, sourceFile: string): Loc
   const rawStrings = (resources as { string?: unknown }).string;
   const list = Array.isArray(rawStrings) ? rawStrings : rawStrings ? [rawStrings] : [];
 
+  const linesByName = buildLineIndex(raw);
+
   for (const item of list) {
     if (!item || typeof item !== 'object') continue;
     const obj = item as Record<string, unknown>;
@@ -39,24 +41,40 @@ export function parseAndroidStringsXmlText(raw: string, sourceFile: string): Loc
     const translatable = obj['@_translatable'];
     if (translatable === 'false' || translatable === false) continue;
     if (!name) continue;
-    // fast-xml-parser may set the value directly (string) or under '#text' when
-    // attributes are present. Treat everything else as the value too.
     const text = typeof obj['#text'] === 'string'
       ? (obj['#text'] as string)
       : typeof obj === 'string'
         ? (obj as unknown as string)
-        : // When an element has only text, the whole obj may be the string — but
-          // attributes force it into an object shape; handle numeric/other.
-          extractTextFallback(obj);
+        : extractTextFallback(obj);
     if (typeof text !== 'string') continue;
-    entries.push({
+    const entry: LocaleEntry = {
       key: name,
       value: unescapeAndroidString(text),
       locale,
       sourceFile,
-    });
+    };
+    const ln = linesByName.get(name);
+    if (ln !== undefined) entry.line = ln;
+    entries.push(entry);
   }
   return entries;
+}
+
+/**
+ * Build key → line number by scanning the raw XML for `<string name="KEY"`.
+ * This is independent of the parser and robust to attribute ordering.
+ */
+function buildLineIndex(raw: string): Map<string, number> {
+  const map = new Map<string, number>();
+  const lines = raw.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const m = line.match(/<string\b[^>]*\bname\s*=\s*"([^"]+)"/);
+    if (m) {
+      if (!map.has(m[1]!)) map.set(m[1]!, i + 1);
+    }
+  }
+  return map;
 }
 
 function extractTextFallback(obj: Record<string, unknown>): string | undefined {

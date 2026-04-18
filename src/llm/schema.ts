@@ -52,4 +52,4 @@ export const REPORT_FINDINGS_TOOL = {
   },
 } as const;
 
-export const PROMPT_VERSION = 'v2';
+export const PROMPT_VERSION = 'v3';

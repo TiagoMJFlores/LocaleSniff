@@ -53,9 +53,20 @@ export async function loadLocaleIndex(
 
   const localesSet = new Set<LocaleCode>();
   const keysSet = new Set<string>();
+  const valuesByKey = new Map<string, Map<LocaleCode, string>>();
   for (const e of entries) {
     localesSet.add(e.locale);
     keysSet.add(e.key);
+    let byLocale = valuesByKey.get(e.key);
+    if (!byLocale) {
+      byLocale = new Map<LocaleCode, string>();
+      valuesByKey.set(e.key, byLocale);
+    }
+    // First occurrence wins. Duplicates across multiple locale files for the
+    // same (key, locale) pair are rare and best not silently overwritten.
+    if (!byLocale.has(e.locale)) {
+      byLocale.set(e.locale, e.value);
+    }
   }
   const locales = [...localesSet].sort();
   const baseLocale = pickBaseLocale(platform, locales, sourceLanguageFromXcstrings);
@@ -66,6 +77,7 @@ export async function loadLocaleIndex(
     baseLocale,
     keys: keysSet,
     entries,
+    valuesByKey,
   };
 }
 

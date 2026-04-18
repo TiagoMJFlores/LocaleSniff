@@ -18,13 +18,17 @@ export async function parseStringsFile(absPath: string): Promise<LocaleEntry[]> 
 }
 
 export function parseStringsText(text: string, locale: LocaleCode, sourceFile: string): LocaleEntry[] {
-  // Strip block comments
-  const noBlockComments = text.replace(/\/\*[\s\S]*?\*\//g, '');
+  // Strip block comments while preserving line structure so line numbers stay accurate.
+  const noBlockComments = text.replace(/\/\*[\s\S]*?\*\//g, (match) => {
+    // Preserve newlines inside the comment so downstream line counts are stable.
+    return match.replace(/[^\n]/g, '');
+  });
   const entries: LocaleEntry[] = [];
   // Match: "key" = "value";  with escape handling for \" inside either string.
   const re = /"((?:\\.|[^"\\])*)"\s*=\s*"((?:\\.|[^"\\])*)"\s*;/g;
   const lines = noBlockComments.split(/\r?\n/);
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     const trimmed = line.trimStart();
     if (trimmed.startsWith('//')) continue;
     let m: RegExpExecArray | null;
@@ -34,6 +38,7 @@ export function parseStringsText(text: string, locale: LocaleCode, sourceFile: s
         value: unescape(m[2]!),
         locale,
         sourceFile,
+        line: i + 1,
       });
     }
     re.lastIndex = 0;

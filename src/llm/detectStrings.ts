@@ -75,16 +75,17 @@ function toFindings(resp: DetectResponse, file: ChangedFile): Finding[] {
   const out: Finding[] = [];
   for (const raw of resp.findings) {
     if (!isLineInAddedRanges(raw.line, file.addedRanges)) continue;
-    out.push(rawToFinding(raw, file.repoRelPath));
+    out.push(rawToFinding(raw, file));
   }
   out.sort((a, b) => (a.line - b.line) || a.stringLiteral.localeCompare(b.stringLiteral));
   return out;
 }
 
-function rawToFinding(raw: RawFinding, file: string): Finding {
+function rawToFinding(raw: RawFinding, file: ChangedFile): Finding {
   const f: Finding = {
-    file,
+    file: file.repoRelPath,
     line: raw.line,
+    platform: file.platform,
     stringLiteral: raw.string_literal,
     isUserFacing: raw.is_user_facing,
     rationale: raw.rationale,
