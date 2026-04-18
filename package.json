@@ -1,0 +1,40 @@
+{
+  "name": "localesniff",
+  "version": "0.0.1",
+  "description": "Detect hardcoded user-facing strings in iOS/Android codebases and suggest externalized keys + translations.",
+  "type": "module",
+  "bin": {
+    "localesniff": "bin/localesniff.mjs"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier -w ."
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "fast-glob": "^3.3.2",
+    "fast-xml-parser": "^4.5.0",
+    "p-limit": "^6.1.0",
+    "simple-git": "^3.27.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
