@@ -1,35 +1,32 @@
 # LocaleSniff
 
-## The problem
+Catches hardcoded user-facing strings in mobile codebases before they ship. Point it at a git diff and it flags every string that should have been externalized. Ask for a recommendation and it also proposes a key name, translates into every locale your project supports, and tells you the exact file and line where each entry belongs.
 
-Every team has the story: QA opens the app in French the day before release and there's a button still saying "Continue" in English. A hardcoded string slipped through two weeks ago, nobody caught it, and now the release is on hold while someone finds the string, writes six translations, and goes back through review.
+Built for Jenkins, works from the terminal, supports iOS (Swift, Obj-C) and Android (Kotlin, Java, XML). Detection is LLM-based (Claude), so there's nothing to configure per framework.
 
-The fix itself is trivial. Everything around it (re-cutting the build, re-testing, the schedule slip) is not. And it keeps happening, because a hardcoded string doesn't break the build and doesn't stand out in a diff.
+<!-- TODO: add screenshot of the CLI output against a real diff -->
 
-LocaleSniff takes a git diff (anything `git diff` can produce: a branch vs `main`, the last commit, the last two weeks of activity) and flags hardcoded user-facing strings inside the added lines.
+## Why
 
-It's built for Jenkins. Two natural places to run it:
+Hardcoded strings keep slipping into releases. A dev pushes a quick fix, forgets to externalize the string, nobody catches it in review, and QA finds a button in plain English the day before the release in France. The fix itself is trivial, but everything around it (re-cutting the build, re-testing, the schedule slip) is not.
 
-- **Before merge**: on a PR branch against `main`, fail the build if new hardcoded strings were added.
-- **Before release**: in the release pipeline, diff against the last release tag and block the cut if anything slipped through.
-
-The tool doesn't care which one you use, and both can coexist. You can also run it locally on a branch you're reviewing.
+The checks that would catch it exist but don't run at the right moment. Xcode's `Missing Localizability` is a local warning. Android Lint's `MissingTranslation` doesn't look inside Kotlin. Pseudolocalization needs someone to run the app by hand. LocaleSniff runs on the pipeline, on the diff, before the merge or the release cut.
 
 ## What it does
 
-Runs on your mobile codebase (iOS Swift/Obj-C, Android Kotlin/Java/XML) and scans git diffs for hardcoded user-facing strings. By default it just tells you what it found; pass `--recommend` and it also suggests:
+Two modes:
 
-- a key name that fits your project's existing naming convention
-- translations for every locale your project already supports
-- exactly which locale file to edit, and where in that file to insert the new entry (next to related keys, not at the bottom)
+**Detect (default, cheap):**
+- Runs on a git diff you choose (a PR branch vs `main`, the last commit, the last two weeks of activity)
+- Flags every hardcoded user-facing string in the added lines
+- Ignores strings already wrapped in `NSLocalizedString`, `String(localized:)`, `getString(R.string.*)`, `stringResource(R.string.*)`
+- Skips technical strings (log messages, URLs, enum raw values, etc.) and summarizes them as a single line
 
-If the string you just hardcoded is something that already exists somewhere else in your locale files, LocaleSniff will spot that too and offer the reuse option instead of a fresh key.
-
-## How it works
-
-The detection is LLM-based (Claude), not AST-based. This makes the tool framework-agnostic (SwiftUI, UIKit, Compose, old XML layouts, it doesn't matter) and lets it make judgement calls like "this `print` call is a debug log, not a user message".
-
-Results are cached per file and per prompt version, so re-running against the same diff is effectively free.
+**Recommend (`--recommend`):**
+- Suggests a key name aligned with your project's existing naming convention
+- Generates translations for every locale already present in the project
+- For each locale file, shows the exact line to insert the new entry, anchored to an existing key so the insertion stays stable as the file evolves
+- If the string already exists somewhere in the locale files, offers the reuse option instead of a fresh key (and fills in missing translations if some locales still don't have it)
 
 ## Quick start
 
@@ -41,39 +38,48 @@ npm link
 # set your API key
 echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
 
-# scan the last commit (just see what's there)
+# scan the last commit
 localesniff scan --since=HEAD~1
 
 # scan a PR branch with suggested keys + translations
 localesniff scan --since=origin/main --recommend
 
-# scan the last week of activity, skip test files
+# scan the last week, skip tests
 localesniff scan --window=1w --ignore "**/*Tests*/**" --ignore "**/*Spec.swift"
 ```
 
-## Flags worth knowing
+## CLI flags
 
 | Flag | What it does |
 |---|---|
 | `--since=<ref or date>` | Diff base: a git ref (`origin/main`, `HEAD~5`) or a date (`"2 weeks ago"`). Default: `origin/main`. |
-| `--window=1w` / `14d` / `2m` | Last N of activity, anchored to HEAD's commit date (not wall clock). |
+| `--window=1w` / `14d` / `2m` | Last N of activity, anchored to HEAD's commit date. |
 | `--full` | Scan the whole repo. Expensive, prefer git-scoped modes. |
-| `--recommend` | Add suggested keys, translations, and insertion points to the output. |
-| `--include-technical` | Show strings classified as technical too (URLs, log messages, etc.). |
+| `--recommend` | Add suggested keys, translations, and insertion points. |
+| `--include-technical` | Show strings classified as technical too. |
 | `--ignore <pattern>` | Exclude paths. Repeatable. |
-| `--fail-on any|user-facing` | Exit non-zero when findings exist. Meant for CI. |
-| `--dry-run` | Print what would be scanned (and what will be skipped at zero cost) without calling the LLM. |
-| `--output-format json` | Emit JSON instead of the text report. |
+| `--fail-on any\|user-facing` | Exit non-zero when findings exist. |
+| `--dry-run` | Print what would be scanned without calling the LLM. |
+| `--output-format json` | Emit JSON instead of text. |
 
-## Using it in CI
+## Using it in Jenkins
 
-Set `ANTHROPIC_API_KEY`, add a step that runs `localesniff scan --since=origin/main --fail-on=user-facing --output-format=json > report.json`, and fail the build on non-zero exit. Archive `report.json` so reviewers can see what was flagged.
+Two natural places:
 
-A Jenkins example (and JUnit/SARIF output) is coming.
+**Before merge.** On a PR branch, fail the build if new hardcoded strings were added.
 
-## What's not in here yet
+```
+localesniff scan --since=origin/main --fail-on=user-facing
+```
 
-- `apply` subcommand that writes the suggested edits for you
-- JUnit / SARIF output formats
-- `.stringsdict` plurals and `<plurals>` on Android
-- A UI for non-devs to triage findings
+**Before release.** In the release pipeline, diff against the last tag and block the cut if anything slipped through.
+
+```
+localesniff scan --since=v2.3.0 --fail-on=user-facing
+```
+
+Both can coexist. You can also run the same commands locally to review a branch before approving it.
+
+## How it works
+
+Detection is LLM-based (Claude), not AST-based. That keeps the tool framework-agnostic (SwiftUI, UIKit, Compose, old XML layouts, it doesn't matter) and lets it make judgement calls like "this `print` is a debug log, not a user message". Results are cached per file, per prompt version, and per mode, so re-running against the same diff is effectively free.
