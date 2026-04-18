@@ -33,11 +33,13 @@ export async function detectStringsInFile(
   localeIndex: LocaleIndex,
 ): Promise<DetectFileResult> {
   const context = selectContext(localeIndex, file.repoRelPath, file.addedContent);
-  const prompt = buildPrompt(file, localeIndex, context);
+  const prompt = buildPrompt(file, localeIndex, context, { recommend: deps.cfg.recommend });
 
   const key = cacheKey({
+    // Include the mode in the promptVersion so detect-only and recommend runs
+    // don't share cache entries.
     model: deps.cfg.model,
-    promptVersion: PROMPT_VERSION,
+    promptVersion: `${PROMPT_VERSION}-${deps.cfg.recommend ? 'recommend' : 'detect'}`,
     filePath: file.repoRelPath,
     addedContent: file.addedContent,
     contextDigest: context.digest,
@@ -73,20 +75,36 @@ export async function detectStringsInFile(
 
 function toFindings(resp: DetectResponse, file: ChangedFile): Finding[] {
   const out: Finding[] = [];
+  const sourceLineByLine = indexSourceLines(file.addedContent);
   for (const raw of resp.findings) {
     if (!isLineInAddedRanges(raw.line, file.addedRanges)) continue;
-    out.push(rawToFinding(raw, file));
+    out.push(rawToFinding(raw, file, sourceLineByLine.get(raw.line) ?? ''));
   }
   out.sort((a, b) => (a.line - b.line) || a.stringLiteral.localeCompare(b.stringLiteral));
   return out;
 }
 
-function rawToFinding(raw: RawFinding, file: ChangedFile): Finding {
+function indexSourceLines(addedContent: string): Map<number, string> {
+  // addedContent lines are formatted as "<postLine>\t<source>"
+  const out = new Map<number, string>();
+  for (const row of addedContent.split('\n')) {
+    const tab = row.indexOf('\t');
+    if (tab <= 0) continue;
+    const lineStr = row.slice(0, tab);
+    const body = row.slice(tab + 1);
+    const n = parseInt(lineStr, 10);
+    if (Number.isFinite(n)) out.set(n, body);
+  }
+  return out;
+}
+
+function rawToFinding(raw: RawFinding, file: ChangedFile, sourceLine: string): Finding {
   const f: Finding = {
     file: file.repoRelPath,
     line: raw.line,
     platform: file.platform,
     stringLiteral: raw.string_literal,
+    sourceLine: sourceLine.trim(),
     isUserFacing: raw.is_user_facing,
     rationale: raw.rationale,
     suggestedKey: raw.suggested_key,

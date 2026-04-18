@@ -15,6 +15,8 @@ export interface RawCliOptions {
   dryRun?: boolean;
   verbose?: boolean;
   ignore?: string[];
+  recommend?: boolean;
+  includeTechnical?: boolean;
 }
 
 export function resolveConfig(opts: RawCliOptions): RunConfig {
@@ -37,6 +39,8 @@ export function resolveConfig(opts: RawCliOptions): RunConfig {
     dryRun: Boolean(opts.dryRun),
     verbose: Boolean(opts.verbose),
     ignore: Array.isArray(opts.ignore) ? opts.ignore : [],
+    recommend: Boolean(opts.recommend),
+    includeTechnical: Boolean(opts.includeTechnical),
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   };
 }

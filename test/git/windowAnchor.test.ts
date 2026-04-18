@@ -35,6 +35,8 @@ describe('resolveScope --window anchors to HEAD date (bulletproof)', () => {
     dryRun: false,
     verbose: false,
     ignore: [],
+    recommend: true,
+    includeTechnical: false,
     anthropicApiKey: 'test',
     ...overrides,
   });

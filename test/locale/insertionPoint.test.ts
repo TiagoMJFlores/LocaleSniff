@@ -113,5 +113,24 @@ describe('findInsertionPoint', () => {
     expect(r.lineless).toBe(true);
     expect(r.matchedPrefix).toEqual(['login']);
     expect(r.afterLine).toBeNull();
+    expect(r.anchorKey).toBe('login.button');
+  });
+
+  it('returns the anchor key used for insertion', () => {
+    const entries = [
+      mk('login.title', 10),
+      mk('login.button', 11),
+      mk('home.welcome', 20),
+    ];
+    const r = findInsertionPoint(entries, 'login.badge');
+    expect(r.anchorKey).toBe('login.button');
+    expect(r.afterLine).toBe(11);
+  });
+
+  it('returns null anchorKey when falling back to EOF', () => {
+    const entries = [mk('home.title', 5)];
+    const r = findInsertionPoint(entries, 'settings.privacy');
+    expect(r.anchorKey).toBeNull();
+    expect(r.afterLine).toBeNull();
   });
 });

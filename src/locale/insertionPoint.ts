@@ -12,6 +12,12 @@ export interface InsertionPoint {
    */
   matchedPrefix: string[] | null;
   /**
+   * The existing key that serves as the insertion anchor — i.e. "insert AFTER
+   * this key". More stable across file edits than the line number, since line
+   * numbers shift when someone else adds lines above.
+   */
+  anchorKey: string | null;
+  /**
    * True when the file is a format with no meaningful line numbers (e.g.
    * .xcstrings JSON). Callers should render prose instead of a line number.
    */
@@ -40,12 +46,12 @@ export function findInsertionPoint(
   const lineless = !hasLineNumbers && entriesInFile.length > 0;
 
   if (entriesInFile.length === 0) {
-    return { afterLine: null, matchedPrefix: null, lineless };
+    return { afterLine: null, matchedPrefix: null, anchorKey: null, lineless };
   }
 
   const newTokens = tokenize(newKey);
   if (newTokens.length === 0) {
-    return { afterLine: null, matchedPrefix: null, lineless };
+    return { afterLine: null, matchedPrefix: null, anchorKey: null, lineless };
   }
 
   const tokenized = entriesInFile.map((e) => ({
@@ -59,25 +65,27 @@ export function findInsertionPoint(
     const matches = tokenized.filter((t) => startsWithTokens(t.tokens, prefix));
     if (matches.length === 0) continue;
 
-    // Pick the last occurrence (by line number, then by input order for
-    // lineless files).
+    // Pick the last occurrence: by line number when available, else by the
+    // last entry in input order (stable for lineless files).
     let best = matches[0]!;
     for (const m of matches) {
-      const bestLine = best.entry.line ?? Number.POSITIVE_INFINITY;
-      const mLine = m.entry.line ?? Number.POSITIVE_INFINITY;
       if (typeof m.entry.line === 'number' && typeof best.entry.line === 'number') {
-        if (mLine > bestLine) best = m;
+        if (m.entry.line > best.entry.line) best = m;
+      } else {
+        // Lineless — later match in iteration order wins.
+        best = m;
       }
     }
 
     return {
       afterLine: typeof best.entry.line === 'number' ? best.entry.line : null,
       matchedPrefix: prefix,
+      anchorKey: best.entry.key,
       lineless,
     };
   }
 
-  return { afterLine: null, matchedPrefix: null, lineless };
+  return { afterLine: null, matchedPrefix: null, anchorKey: null, lineless };
 }
 
 function tokenize(key: string): string[] {

@@ -61,6 +61,8 @@ describe('runScan (end-to-end with fake LLM)', () => {
     dryRun: false,
     verbose: false,
     ignore: [],
+    recommend: true,
+    includeTechnical: false,
     anthropicApiKey: 'test',
   });
 

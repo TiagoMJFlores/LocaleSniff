@@ -6,8 +6,12 @@ export interface BuiltPrompt {
   user: string;
 }
 
-export function buildSystemPrompt(): string {
-  return [
+export interface PromptOptions {
+  recommend: boolean;
+}
+
+export function buildSystemPrompt(opts: PromptOptions = { recommend: true }): string {
+  const base = [
     'You are LocaleSniff, a strict code reviewer focused on internationalization.',
     '',
     'Your task: given a diff of added lines from a mobile source file (iOS Swift/Obj-C or Android Kotlin/Java/XML), identify every hardcoded string literal that is shown to end users ("user-facing") and every one that is NOT (technical).',
@@ -16,6 +20,21 @@ export function buildSystemPrompt(): string {
     '  iOS: Strings passed to SwiftUI Text(...), Label(...), Button("..."), alert titles/messages, Toolbar labels, and other display APIs ARE user-facing. Strings already wrapped in NSLocalizedString(...), String(localized: ...), or LocalizedStringKey(...) are already externalized — DO NOT report them.',
     '  Android: Strings passed to Compose Text("..."), Button("...") content, TextView setters, Toolbar/Dialog builders ARE user-facing. Strings returned by getString(R.string.*), stringResource(R.string.*), or referenced via @string/* are already externalized — DO NOT report them.',
     '  Both: Strings used as URLs, HTTP headers, JSON keys, enum raw values, error identifiers, log messages, assertion text, accessibility IDs used programmatically, analytics event names, or BuildConfig constants are TECHNICAL, not user-facing. Report them only when asked; otherwise omit.',
+  ];
+  if (!opts.recommend) {
+    base.push(
+      '',
+      'Detect-only mode:',
+      '  - Report every detected string literal with classification and a short rationale.',
+      '  - Leave suggested_key as an empty string and translations as an empty object {}.',
+      '  - Leave duplicate_of_key absent.',
+      '  - Do NOT spend effort generating key names or translations — the consumer does not need them in this mode.',
+      '',
+      'Output: call the report_findings tool exactly once with all findings.',
+    );
+    return base.join('\n');
+  }
+  base.push(
     '',
     'Key naming rules:',
     '  - Lowercase snake.dot.case — matches the regex ^[a-z0-9_.]+$',
@@ -32,7 +51,8 @@ export function buildSystemPrompt(): string {
     '  - Use established translations for common UI concepts (Cancel, Save, Next, Close) rather than literal word-by-word.',
     '',
     'Output: call the report_findings tool exactly once with all findings.',
-  ].join('\n');
+  );
+  return base.join('\n');
 }
 
 export function buildUserPrompt(
@@ -65,9 +85,10 @@ export function buildPrompt(
   file: ChangedFile,
   localeIndex: LocaleIndex,
   context: ContextBlock,
+  opts: PromptOptions = { recommend: true },
 ): BuiltPrompt {
   return {
-    system: buildSystemPrompt(),
+    system: buildSystemPrompt(opts),
     user: buildUserPrompt(file, localeIndex, context),
   };
 }

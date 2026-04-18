@@ -22,6 +22,8 @@ const cfg: RunConfig = {
   dryRun: false,
   verbose: false,
   ignore: [],
+  recommend: true,
+  includeTechnical: false,
   anthropicApiKey: 'test',
 };
 
