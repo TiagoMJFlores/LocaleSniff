@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.local
+.localesniff-cache/
+*.log
+.DS_Store
+coverage/
