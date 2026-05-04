@@ -2,7 +2,7 @@
 
 Catches hardcoded user-facing strings in mobile codebases before they ship. Point it at a git diff and it flags every string that should have been externalized. Ask for a recommendation and it also proposes a key name, translates into every locale your project supports, and tells you the exact file and line where each entry belongs.
 
-Built for Jenkins, works from the terminal, supports iOS (Swift, Obj-C) and Android (Kotlin, Java, XML). Detection is LLM-based (Claude), so there's nothing to configure per framework.
+Built for Jenkins, works from the terminal, supports iOS (Swift, Obj-C) and Android (Kotlin, Java, XML). Detection is LLM-based, with support for both Anthropic (Claude) and OpenAI (GPT) — pick one with `--provider` or just set whichever API key you have.
 
 <!-- TODO: add screenshot of the CLI output against a real diff -->
 
@@ -35,8 +35,9 @@ npm install
 npm run build
 npm link
 
-# set your API key
+# set your API key (one of these)
 echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+# echo "OPENAI_API_KEY=sk-..." > .env
 
 # scan the last commit
 localesniff scan --since=HEAD~1
@@ -58,6 +59,8 @@ localesniff scan --window=1w --ignore "**/*Tests*/**" --ignore "**/*Spec.swift"
 | `--recommend` | Add suggested keys, translations, and insertion points. |
 | `--include-technical` | Show strings classified as technical too. |
 | `--ignore <pattern>` | Exclude paths. Repeatable. |
+| `--provider anthropic\|openai` | Which LLM to use. Auto-detected from your API keys if omitted. |
+| `--model <id>` | Specific model id. Defaults to `claude-sonnet-4-5` or `gpt-4o`. |
 | `--fail-on any\|user-facing` | Exit non-zero when findings exist. |
 | `--dry-run` | Print what would be scanned without calling the LLM. |
 | `--output-format json` | Emit JSON instead of text. |
@@ -82,4 +85,4 @@ Both can coexist. You can also run the same commands locally to review a branch 
 
 ## How it works
 
-Detection is LLM-based (Claude), not AST-based. That keeps the tool framework-agnostic (SwiftUI, UIKit, Compose, old XML layouts, it doesn't matter) and lets it make judgement calls like "this `print` is a debug log, not a user message". Results are cached per file, per prompt version, and per mode, so re-running against the same diff is effectively free.
+Detection is LLM-based, not AST-based. That keeps the tool framework-agnostic (SwiftUI, UIKit, Compose, old XML layouts, it doesn't matter) and lets it make judgement calls like "this `print` is a debug log, not a user message". Both Anthropic and OpenAI are supported via the Vercel AI SDK, so you can pick whichever you already pay for. Results are cached per file, per prompt version, and per mode, so re-running against the same diff is effectively free.
