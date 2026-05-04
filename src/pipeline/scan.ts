@@ -58,18 +58,48 @@ export async function runScan(cfg: RunConfig, deps: PipelineDeps): Promise<ScanR
   let tokensIn = 0;
   let tokensOut = 0;
 
+  const total = eligible.length;
+  let completed = 0;
+  // Show progress whenever the report is human-readable. JSON consumers parse
+  // stdout, but progress goes to stderr and it would still be noise for them.
+  // CI logs (Jenkins, etc.) ARE non-TTY but are exactly the place we still want
+  // to see what's happening — so we don't gate on isTTY.
+  const showProgress = cfg.outputFormat !== 'json';
+
+  if (showProgress && total > 0) {
+    process.stderr.write(`Scanning ${total} file${total === 1 ? '' : 's'}...\n`);
+  }
+
   const allFindings = await Promise.all(
     eligible.map((file) =>
       limit(async () => {
         const idx = indexByPlatform.get(file.platform)!;
+        const startedAt = Date.now();
         try {
           const res = await detectStringsInFile({ cfg, llm: deps.llm, cache: deps.cache, logger: deps.logger }, file, idx);
           if (res.cacheHit) cacheHits += 1;
           else llmCalls += 1;
           tokensIn += res.tokensIn;
           tokensOut += res.tokensOut;
+          completed += 1;
+          if (showProgress) {
+            const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+            const status = res.cacheHit ? 'cached' : `${elapsed}s`;
+            const userFacing = res.findings.filter((f) => f.isUserFacing).length;
+            const technical = res.findings.length - userFacing;
+            const summary = userFacing > 0
+              ? `${userFacing} user-facing${technical > 0 ? `, ${technical} technical` : ''}`
+              : technical > 0
+                ? `${technical} technical`
+                : 'no findings';
+            process.stderr.write(`  [${completed}/${total}] ${file.repoRelPath} — ${summary} (${status})\n`);
+          }
           return res.findings;
         } catch (err) {
+          completed += 1;
+          if (showProgress) {
+            process.stderr.write(`  [${completed}/${total}] ${file.repoRelPath} — failed\n`);
+          }
           deps.logger.warn(`detect failed for ${file.repoRelPath}: ${(err as Error).message}`);
           skipped.push({ file: file.repoRelPath, reason: (err as Error).message });
           return [];
