@@ -22,7 +22,9 @@
     "format": "prettier -w ."
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.0",
+    "@ai-sdk/anthropic": "^3.0.74",
+    "@ai-sdk/openai": "^3.0.58",
+    "ai": "^6.0.174",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
     "fast-glob": "^3.3.2",

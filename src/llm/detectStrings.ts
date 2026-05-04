@@ -35,10 +35,13 @@ export async function detectStringsInFile(
   const context = selectContext(localeIndex, file.repoRelPath, file.addedContent);
   const prompt = buildPrompt(file, localeIndex, context, { recommend: deps.cfg.recommend });
 
+  // The CLI fills the model default before calling runScan; tests pass an
+  // explicit value too. Fall back to a sentinel so the cache key is stable.
+  const modelId = deps.cfg.model ?? 'default';
   const key = cacheKey({
     // Include the mode in the promptVersion so detect-only and recommend runs
     // don't share cache entries.
-    model: deps.cfg.model,
+    model: modelId,
     promptVersion: `${PROMPT_VERSION}-${deps.cfg.recommend ? 'recommend' : 'detect'}`,
     filePath: file.repoRelPath,
     addedContent: file.addedContent,
@@ -61,7 +64,7 @@ export async function detectStringsInFile(
   const { response, tokensIn, tokensOut } = await deps.llm.detect({
     systemPrompt: prompt.system,
     userPrompt: prompt.user,
-    model: deps.cfg.model,
+    model: modelId,
   });
   await deps.cache.set(key, response);
 

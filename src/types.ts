@@ -100,6 +100,8 @@ export type PlatformFilter = 'ios' | 'android' | 'both';
 export type OutputFormat = 'text' | 'json';
 export type FailOnMode = 'none' | 'any' | 'user-facing';
 
+export type LlmProvider = 'anthropic' | 'openai';
+
 export interface RunConfig {
   repoRoot: string;
   since: string;
@@ -109,7 +111,10 @@ export interface RunConfig {
   outputFormat: OutputFormat;
   cacheDir: string;
   failOn: FailOnMode;
-  model: string;
+  /** Explicit provider choice; when undefined the CLI auto-detects from env. */
+  provider: LlmProvider | undefined;
+  /** Model id; when undefined the client falls back to the provider's default. */
+  model: string | undefined;
   concurrency: number;
   dryRun: boolean;
   verbose: boolean;
@@ -119,4 +124,5 @@ export interface RunConfig {
   /** When true, technical (non-user-facing) findings are shown in the text output instead of being summarised. */
   includeTechnical: boolean;
   anthropicApiKey: string | undefined;
+  openaiApiKey: string | undefined;
 }

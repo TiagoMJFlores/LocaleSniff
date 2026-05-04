@@ -4,7 +4,7 @@ import { resolveConfig, type RawCliOptions } from './config.js';
 import { makeLogger } from './logger.js';
 import { resolveScope } from './git/scope.js';
 import { runScan } from './pipeline/scan.js';
-import { makeAnthropicClient } from './llm/client.js';
+import { DEFAULT_MODELS, makeLlmClient, resolveProvider } from './llm/client.js';
 import { FileCache } from './cache/fileStore.js';
 import { renderText } from './report/text.js';
 import { renderJson } from './report/json.js';
@@ -33,7 +33,8 @@ program
   .option('--output-format <format>', 'text | json', 'text')
   .option('--cache-dir <path>', 'Cache directory', './.localesniff-cache')
   .option('--fail-on <mode>', 'none | any | user-facing', 'none')
-  .option('--model <id>', 'Anthropic model id')
+  .option('--provider <name>', 'LLM provider: anthropic | openai (auto-detected from env if omitted)')
+  .option('--model <id>', 'Model id (defaults to the provider\'s recommended model)')
   .option('--concurrency <n>', 'LLM call concurrency', '4')
   .option('--repo <path>', 'Repo root', process.cwd())
   .option('--ignore <pattern...>', 'Glob patterns to exclude (repeatable). e.g. --ignore "**/*Tests*/**" "**/*Spec.swift"', collect, [])
@@ -102,15 +103,25 @@ program
         return;
       }
 
-      if (!cfg.anthropicApiKey) {
-        logger.error('ANTHROPIC_API_KEY is not set. Put it in .env or export it before running.');
+      const resolved = resolveProvider({
+        explicitProvider: cfg.provider,
+        anthropicKey: cfg.anthropicApiKey,
+        openaiKey: cfg.openaiApiKey,
+      });
+      if ('error' in resolved) {
+        logger.error(resolved.error);
         process.exitCode = 2;
         return;
       }
 
-      const llm = makeAnthropicClient(cfg.anthropicApiKey);
+      // Fill in the model default for the chosen provider, since the pipeline
+      // and cache key both depend on a concrete string.
+      const model = cfg.model ?? DEFAULT_MODELS[resolved.provider];
+      logger.debug(`provider: ${resolved.provider}, model: ${model}`);
+
+      const llm = makeLlmClient({ provider: resolved.provider, apiKey: resolved.apiKey });
       const cache = new FileCache(cfg.cacheDir);
-      const result = await runScan(cfg, { llm, cache, logger });
+      const result = await runScan({ ...cfg, model }, { llm, cache, logger });
 
       const rendered = cfg.outputFormat === 'json' ? renderJson(result) : renderText(result, cfg);
       console.log(rendered);

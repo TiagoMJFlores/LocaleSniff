@@ -1,5 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { DetectResponseSchema, REPORT_FINDINGS_TOOL, type DetectResponse } from './schema.js';
+import { generateObject } from 'ai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAI } from '@ai-sdk/openai';
+import { DetectResponseSchema, type DetectResponse } from './schema.js';
+
+export type Provider = 'anthropic' | 'openai';
 
 export interface DetectInput {
   systemPrompt: string;
@@ -17,35 +21,65 @@ export interface LlmClient {
   detect(input: DetectInput): Promise<DetectOutput>;
 }
 
-export function makeAnthropicClient(apiKey: string): LlmClient {
-  const client = new Anthropic({ apiKey });
+export interface ClientConfig {
+  provider: Provider;
+  apiKey: string;
+}
+
+export function makeLlmClient(cfg: ClientConfig): LlmClient {
+  if (cfg.provider === 'openai') {
+    const openai = createOpenAI({ apiKey: cfg.apiKey });
+    return makeClient((modelId) => openai(modelId));
+  }
+  const anthropic = createAnthropic({ apiKey: cfg.apiKey });
+  return makeClient((modelId) => anthropic(modelId));
+}
+
+type ModelFactory = (modelId: string) => Parameters<typeof generateObject>[0]['model'];
+
+function makeClient(modelFactory: ModelFactory): LlmClient {
   return {
     async detect(input) {
-      const res = await client.messages.create({
-        model: input.model,
-        max_tokens: 4096,
-        temperature: 0,
+      const result = await generateObject({
+        model: modelFactory(input.model),
+        schema: DetectResponseSchema,
         system: input.systemPrompt,
-        tools: [REPORT_FINDINGS_TOOL],
-        tool_choice: { type: 'tool', name: 'report_findings' },
-        messages: [{ role: 'user', content: input.userPrompt }],
+        prompt: input.userPrompt,
+        temperature: 0,
       });
-
-      const toolUse = res.content.find((c): c is Anthropic.ToolUseBlock => c.type === 'tool_use');
-      if (!toolUse) {
-        throw new Error('Claude did not return a tool_use block.');
-      }
-      const parsed = DetectResponseSchema.safeParse(toolUse.input);
-      if (!parsed.success) {
-        throw new Error(
-          `Tool input failed schema validation: ${parsed.error.message}`,
-        );
-      }
       return {
-        response: parsed.data,
-        tokensIn: res.usage.input_tokens,
-        tokensOut: res.usage.output_tokens,
+        response: result.object,
+        tokensIn: result.usage?.inputTokens ?? 0,
+        tokensOut: result.usage?.outputTokens ?? 0,
       };
     },
   };
 }
+
+/**
+ * Pick a provider given explicit user choice + available env vars.
+ * Priority: explicit --provider flag → ANTHROPIC_API_KEY → OPENAI_API_KEY.
+ */
+export function resolveProvider(args: {
+  explicitProvider: Provider | undefined;
+  anthropicKey: string | undefined;
+  openaiKey: string | undefined;
+}): { provider: Provider; apiKey: string } | { error: string } {
+  const { explicitProvider, anthropicKey, openaiKey } = args;
+  if (explicitProvider === 'anthropic') {
+    if (!anthropicKey) return { error: 'Provider is anthropic but ANTHROPIC_API_KEY is not set.' };
+    return { provider: 'anthropic', apiKey: anthropicKey };
+  }
+  if (explicitProvider === 'openai') {
+    if (!openaiKey) return { error: 'Provider is openai but OPENAI_API_KEY is not set.' };
+    return { provider: 'openai', apiKey: openaiKey };
+  }
+  if (anthropicKey) return { provider: 'anthropic', apiKey: anthropicKey };
+  if (openaiKey) return { provider: 'openai', apiKey: openaiKey };
+  return { error: 'No API key found. Set ANTHROPIC_API_KEY or OPENAI_API_KEY (or pass --provider explicitly).' };
+}
+
+export const DEFAULT_MODELS: Record<Provider, string> = {
+  anthropic: 'claude-sonnet-4-5',
+  openai: 'gpt-4o',
+};
