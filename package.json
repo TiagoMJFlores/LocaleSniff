@@ -1,25 +1,54 @@
 {
   "name": "localesniff",
-  "version": "0.0.1",
-  "description": "Detect hardcoded user-facing strings in iOS/Android codebases and suggest externalized keys + translations.",
+  "version": "0.1.0",
+  "description": "Catches hardcoded user-facing strings in iOS and Android codebases before they ship. LLM-based, runs on a git diff.",
   "type": "module",
   "bin": {
     "localesniff": "bin/localesniff.mjs"
   },
   "files": [
     "dist",
-    "bin"
+    "bin",
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TiagoMJFlores/LocaleSniff.git"
+  },
+  "homepage": "https://github.com/TiagoMJFlores/LocaleSniff#readme",
+  "bugs": {
+    "url": "https://github.com/TiagoMJFlores/LocaleSniff/issues"
+  },
+  "license": "MIT",
+  "author": "Tiago Flores",
+  "keywords": [
+    "i18n",
+    "localization",
+    "internationalization",
+    "ios",
+    "android",
+    "swift",
+    "kotlin",
+    "mobile",
+    "ci",
+    "jenkins",
+    "claude",
+    "openai",
+    "llm",
+    "static-analysis"
+  ],
   "scripts": {
     "build": "tsc -p .",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "format": "prettier -w ."
+    "format": "prettier -w .",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.74",
